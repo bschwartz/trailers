@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require 'httparty'
+require 'json'
 
 class Trailer
 
@@ -12,26 +13,38 @@ class Trailer
     @web_url.split('/').last
   end
 
-  def video_shell_url
-    @video_shell_url ||= (
-      secret_url = "#{@web_url}includes/trailer/large.html"
-      response = HTTParty.get(secret_url)
+  def movie_id
+    @movie_id ||= (
+      response = HTTParty.get(@web_url)
       if response.code == 200
-        shell_url = response.body.scan(/class="movieLink" href="(.*?)"/).flatten.first
-        # e.g. http://movietrailers.apple.com/movies/independent/justinbiebersbelieve/believe-tlr1_480p.mov?width=848&amp;height=352
-        shell_url.gsub(/\?.*$/, '')
+        # Get the ID of this movie
+        # e.g. <meta name="apple-itunes-app" content="app-id=471966214, app-argument=movietrailers://movie/detail/17942">
+        response.body.scan(%r|movietrailers://movie/detail/(\d+)|).flatten.first
       else
-        nil
+        STDERR.puts 'Failed to get movie ID'
       end
     )
   end
 
-  def video_480p_url
-    video_shell_url.gsub('480p', 'h480p')
+  def data
+    @data ||= (
+      url = "http://trailers.apple.com/trailers/feeds/data/#{movie_id}.json"
+      response = HTTParty.get(url)
+      if response.code == 200
+        JSON.parse(response.body)
+      else
+        STDERR.puts 'Failed to get JSON for trailer'
+      end
+    )
   end
 
-  def video_720p_url
-    video_shell_url.gsub('480p', 'h720p')
+  # There can be a bunch of "clips", get the one labeled "Trailer"
+  def trailer
+    data['clips'].detect { |c| c['Title'] == 'Trailer' }
+  end
+
+  def video_1080p_url
+    trailer['versions']['enus']['sizes']['hd1080']['srcAlt']
   end
 
 end
@@ -54,11 +67,17 @@ urls.each do |url|
 
   begin
     trailer = Trailer.new(url)
-    print "Downloading trailer for #{trailer.name} ... "
 
-    `curl --silent -H "Referer: trailers.apple.com" -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/31.0.1650.57 Safari/537.36" '#{trailer.video_720p_url}' > trailers/#{trailer.name}.mp4`
+    if File.exist?("trailers/#{trailer.name}.mp4")
+      puts "Skipping #{trailer.name} -- already have it"
+      next
+    end
 
-    puts "done!\n"
+    puts "Downloading trailer for #{trailer.name} ... "
+
+    `curl --progress-bar -H "Referer: trailers.apple.com" -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/31.0.1650.57 Safari/537.36" '#{trailer.video_1080p_url}' > trailers/#{trailer.name}.mp4`
+
+    puts "\n"
 
   rescue Exception => ex
     puts "Cannot get #{url}:\n#{ex}\n\n"
