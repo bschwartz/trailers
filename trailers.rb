@@ -40,7 +40,7 @@ class Trailer
 
   # There can be a bunch of "clips", get the one labeled "Trailer"
   def trailer
-    data['clips'].detect { |c| c['Title'] == 'Trailer' }
+    data['clips'].detect { |c| c['title'] == 'Trailer' }
   end
 
   def video_1080p_url
